@@ -38,6 +38,19 @@ function str(...vals: unknown[]): string | null {
 function get(obj: unknown, path: string): unknown {
   return path.split(".").reduce<unknown>((acc, k) => (acc && typeof acc === "object" ? (acc as Json)[k] : undefined), obj);
 }
+/**
+ * TikTok renvoie des listes d'URL dont les premières sont souvent en HEIC (illisible dans
+ * Chrome / Firefox) ou avec une extension générique `.image` : on préfère un JPEG / PNG / WebP.
+ */
+function pickImage(...lists: unknown[]): string | null {
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    const urls = list.filter((u): u is string => typeof u === "string" && u.trim() !== "");
+    if (urls.length === 0) continue;
+    return urls.find((u) => /\.(jpe?g|png|webp)(\?|$)/i.test(u)) ?? urls.at(-1) ?? null;
+  }
+  return null;
+}
 function toDate(v: unknown): Date {
   if (typeof v === "number") return new Date(v < 1e12 ? v * 1000 : v);
   if (typeof v === "string") {
@@ -119,7 +132,7 @@ export class ScrapeCreatorsProvider implements SocialProvider {
         profile = {
           handle,
           displayName: str(a.nickname, a.unique_id),
-          avatarUrl: str(get(a, "avatar_larger.url_list.0"), get(a, "avatar_medium.url_list.0"), get(a, "avatar_thumb.url_list.0")),
+          avatarUrl: pickImage(get(a, "avatar_300x300.url_list"), get(a, "avatar_larger.url_list"), get(a, "avatar_medium.url_list"), get(a, "avatar_thumb.url_list")),
           profileUrl: profileUrlFor("TIKTOK", handle),
           bio: str(a.signature),
           followers: num(a.follower_count),
@@ -133,7 +146,7 @@ export class ScrapeCreatorsProvider implements SocialProvider {
           externalId: id,
           url: str(it.share_url) ?? `https://www.tiktok.com/@${handle}/video/${id}`,
           caption: str(it.desc),
-          thumbnailUrl: str(get(it, "video.cover.url_list.0"), get(it, "video.origin_cover.url_list.0"), get(it, "video.dynamic_cover.url_list.0")),
+          thumbnailUrl: pickImage(get(it, "video.cover.url_list"), get(it, "video.origin_cover.url_list"), get(it, "video.dynamic_cover.url_list")),
           publishedAt: toDate(it.create_time),
           views: num(stats.play_count),
           likes: num(stats.digg_count),
