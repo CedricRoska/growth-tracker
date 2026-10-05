@@ -1,28 +1,37 @@
 import { prisma } from "@/lib/prisma";
-import { getSocialProvider, normalizeHandle, type PostData } from "@/lib/providers";
+import { getSocialProvider, normalizeHandle, type PostData, type ProfileData } from "@/lib/providers";
 
-export type SyncAccountResult = { accountId: string; ok: boolean; posts: number; error?: string };
+export type SyncAccountResult = { accountId: string; ok: boolean; posts: number; requests: number; error?: string };
+
+const PROFILE_MAX_AGE = 24 * 3_600_000;
 
 /**
- * Synchronise un compte : profil + posts récents, upsert des posts,
- * puis snapshot du compte et de chaque post (base des deltas quotidiens).
+ * Synchronise un compte : posts récents (paginés), profil si nécessaire, upsert des posts,
+ * puis snapshot du compte et de chaque post (base de l'historique followers).
+ *
+ * Économie de crédits : le profil n'est redemandé que s'il n'est pas déjà dans la réponse
+ * des posts (TikTok le fournit), et au plus une fois par 24 h (Instagram).
  */
 export async function syncAccount(accountId: string, asOf?: Date): Promise<SyncAccountResult> {
   const account = await prisma.account.findUnique({ where: { id: accountId } });
-  if (!account) return { accountId, ok: false, posts: 0, error: "Compte introuvable" };
+  if (!account) return { accountId, ok: false, posts: 0, requests: 0, error: "Compte introuvable" };
 
   const provider = getSocialProvider();
   await prisma.account.update({ where: { id: accountId }, data: { syncStatus: "RUNNING", syncError: null } });
 
   try {
-    const [profile, posts] = await Promise.all([
-      provider.getProfile(account.platform, account.handle),
-      provider.getRecentPosts(account.platform, account.handle, { limit: 50, asOf }),
-    ]);
+    const result = await provider.getRecentPosts(account.platform, account.handle, { asOf });
+    let requests = result.requests;
+    let profile: ProfileData | null = result.profile ?? null;
+    const profileStale = !account.lastSyncedAt || account.followers === 0 || Date.now() - account.lastSyncedAt.getTime() > PROFILE_MAX_AGE;
+    if (!profile && profileStale) {
+      profile = await provider.getProfile(account.platform, account.handle);
+      requests += 1;
+    }
     const capturedAt = asOf ?? new Date();
 
     await prisma.$transaction(async (tx) => {
-      for (const p of posts) {
+      for (const p of result.posts) {
         await upsertPost(tx, account.id, p, capturedAt);
       }
       const agg = await tx.post.aggregate({
@@ -30,11 +39,12 @@ export async function syncAccount(accountId: string, asOf?: Date): Promise<SyncA
         _sum: { views: true, likes: true },
         _count: { _all: true },
       });
+      const followers = profile?.followers ?? account.followers;
       await tx.accountSnapshot.create({
         data: {
           accountId: account.id,
           capturedAt,
-          followers: profile.followers,
+          followers,
           totalViews: agg._sum.views ?? 0,
           totalLikes: agg._sum.likes ?? 0,
           totalPosts: agg._count._all,
@@ -43,26 +53,36 @@ export async function syncAccount(accountId: string, asOf?: Date): Promise<SyncA
       await tx.account.update({
         where: { id: account.id },
         data: {
-          displayName: profile.displayName ?? account.displayName,
-          avatarUrl: profile.avatarUrl ?? account.avatarUrl,
-          profileUrl: profile.profileUrl,
-          bio: profile.bio ?? account.bio,
-          followers: profile.followers,
+          ...(profile
+            ? {
+                displayName: profile.displayName ?? account.displayName,
+                avatarUrl: profile.avatarUrl ?? account.avatarUrl,
+                profileUrl: profile.profileUrl,
+                bio: profile.bio ?? account.bio,
+                followers: profile.followers,
+              }
+            : {}),
           syncStatus: "OK",
           syncError: null,
           lastSyncedAt: capturedAt,
         },
       });
+      if (result.creditsRemaining != null) {
+        await tx.workspace.update({
+          where: { id: account.workspaceId },
+          data: { providerCredits: result.creditsRemaining, providerCreditsAt: capturedAt },
+        });
+      }
     });
 
-    return { accountId, ok: true, posts: posts.length };
+    return { accountId, ok: true, posts: result.posts.length, requests };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await prisma.account.update({
       where: { id: accountId },
       data: { syncStatus: "ERROR", syncError: message.slice(0, 500), lastSyncedAt: new Date() },
     });
-    return { accountId, ok: false, posts: 0, error: message };
+    return { accountId, ok: false, posts: 0, requests: 0, error: message };
   }
 }
 
@@ -112,7 +132,7 @@ export async function syncWorkspace(workspaceId: string, trigger = "manual") {
       error: failed.length ? failed.map((f) => f.error).join(" | ").slice(0, 1000) : null,
     },
   });
-  return { runId: run.id, results };
+  return { runId: run.id, results, requests: results.reduce((s, r) => s + r.requests, 0) };
 }
 
 export { normalizeHandle };

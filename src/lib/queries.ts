@@ -356,10 +356,12 @@ export async function getLastSyncRun(workspaceId: string) {
 
 /** Dernier rafraîchissement effectif (ajout de compte compris) + comptes en erreur. */
 export async function getSyncStatus(workspaceId: string) {
-  const [latest, running, failed] = await Promise.all([
+  const [latest, running, failed, accounts, workspace] = await Promise.all([
     prisma.account.findFirst({ where: { workspaceId, lastSyncedAt: { not: null } }, orderBy: { lastSyncedAt: "desc" }, select: { lastSyncedAt: true } }),
     prisma.account.count({ where: { workspaceId, syncStatus: "RUNNING" } }),
     prisma.account.count({ where: { workspaceId, syncStatus: "ERROR" } }),
+    prisma.account.count({ where: { workspaceId, isActive: true } }),
+    prisma.workspace.findUnique({ where: { id: workspaceId }, select: { providerCredits: true, providerCreditsAt: true } }),
   ]);
-  return { at: latest?.lastSyncedAt ?? null, running, failed };
+  return { at: latest?.lastSyncedAt ?? null, running, failed, accounts, credits: workspace?.providerCredits ?? null };
 }

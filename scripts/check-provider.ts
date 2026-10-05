@@ -20,8 +20,9 @@ async function main() {
     try {
       const profile = await provider.getProfile(platform, handle);
       console.log("profil   :", { displayName: profile.displayName, followers: profile.followers, avatar: profile.avatarUrl ? "ok" : "MANQUANT", bio: profile.bio?.slice(0, 40) ?? null });
-      const posts = await provider.getRecentPosts(platform, handle, { limit: 5 });
-      console.log("posts    :", posts.length);
+      const result = await provider.getRecentPosts(platform, handle, { maxPages: 1 });
+      const posts = result.posts;
+      console.log("posts    :", posts.length, "| appels :", result.requests, "| credits restants :", result.creditsRemaining ?? "?", "| profil inclus :", result.profile ? "oui" : "non");
       for (const p of posts.slice(0, 3)) {
         console.log("  -", { id: p.externalId, date: p.publishedAt.toISOString().slice(0, 10), vues: p.views, likes: p.likes, comm: p.comments, partages: p.shares, saves: p.saves, thumb: p.thumbnailUrl ? "ok" : "MANQUANT", caption: p.caption?.slice(0, 30) ?? null });
       }

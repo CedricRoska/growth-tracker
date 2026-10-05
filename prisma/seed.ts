@@ -103,7 +103,7 @@ async function main() {
     });
 
     // Historique : on recalcule l'état des posts à chaque jour passé.
-    const todayPosts = await mock.getRecentPosts(a.platform, a.handle, { limit: 400, asOf: now });
+    const todayPosts = await mock.generatePosts(a.platform, a.handle, { limit: 400, asOf: now });
     await prisma.post.createMany({
       data: todayPosts.map((p) => ({ accountId: account.id, ...p, lastSyncedAt: now })),
     });
@@ -113,7 +113,7 @@ async function main() {
     const accountSnapshots = [];
     for (let d = HISTORY_DAYS; d >= 0; d--) {
       const capturedAt = new Date(now.getTime() - d * DAY);
-      const posts = await mock.getRecentPosts(a.platform, a.handle, { limit: 400, asOf: capturedAt });
+      const posts = await mock.generatePosts(a.platform, a.handle, { limit: 400, asOf: capturedAt });
       let totalViews = 0;
       let totalLikes = 0;
       for (const p of posts) {

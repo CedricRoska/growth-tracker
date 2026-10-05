@@ -1,13 +1,24 @@
 import type { Platform } from "@/generated/prisma/client";
-import { normalizeHandle, profileUrlFor, ProviderError, type FetchOptions, type PostData, type ProfileData, type SocialProvider } from "./types";
+import {
+  normalizeHandle,
+  profileUrlFor,
+  ProviderError,
+  syncSettings,
+  type FetchOptions,
+  type PostData,
+  type PostsResult,
+  type ProfileData,
+  type SocialProvider,
+} from "./types";
 
 /**
  * Provider basé sur l'API ScrapeCreators (https://scrapecreators.com) : données publiques
  * TikTok et Instagram sans OAuth, ce qui permet de suivre des comptes de créateurs tiers.
  *
- * ⚠️ Les chemins/champs ci-dessous suivent la doc publique au moment de l'écriture ;
- * le parsing est volontairement défensif (plusieurs noms de champs testés). À vérifier
- * avec une vraie clé : https://docs.scrapecreators.com
+ * Coût : 1 crédit par appel. Les posts sont paginés (10 par page TikTok, 12 Instagram),
+ * on enchaîne les pages jusqu'à `maxPages` ou jusqu'à dépasser `lookbackDays`.
+ * TikTok renvoie le profil (followers, avatar…) dans la réponse des posts : pas d'appel séparé.
+ * Mapping validé le 2026-10-05 avec `npm run provider:check`.
  */
 const BASE = "https://api.scrapecreators.com";
 
@@ -51,6 +62,7 @@ export class ScrapeCreatorsProvider implements SocialProvider {
     const res = await fetch(url, { headers: { "x-api-key": this.apiKey }, cache: "no-store" });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
+      if (res.status === 402) throw new ProviderError("Plus de crédits ScrapeCreators : recharge ton compte.", 402);
       throw new ProviderError(`ScrapeCreators ${res.status} sur ${path}: ${body.slice(0, 200)}`, res.status);
     }
     return (await res.json()) as Json;
@@ -83,46 +95,96 @@ export class ScrapeCreatorsProvider implements SocialProvider {
     };
   }
 
-  async getRecentPosts(platform: Platform, rawHandle: string, options: FetchOptions = {}): Promise<PostData[]> {
+  async getRecentPosts(platform: Platform, rawHandle: string, options: FetchOptions = {}): Promise<PostsResult> {
     const handle = normalizeHandle(rawHandle);
-    const limit = options.limit ?? 40;
-    if (platform === "TIKTOK") {
-      const data = await this.request("/v3/tiktok/profile/videos", { handle });
-      const items = ((get(data, "aweme_list") ?? get(data, "videos") ?? get(data, "itemList") ?? []) as Json[]).slice(0, limit);
-      return items.map((it) => {
+    const defaults = syncSettings();
+    const maxPages = options.maxPages ?? defaults.maxPages;
+    const lookback = new Date(Date.now() - (options.lookbackDays ?? defaults.lookbackDays) * 86_400_000);
+    return platform === "TIKTOK" ? this.tiktokPosts(handle, maxPages, lookback) : this.instagramPosts(handle, maxPages, lookback);
+  }
+
+  private async tiktokPosts(handle: string, maxPages: number, lookback: Date): Promise<PostsResult> {
+    const posts: PostData[] = [];
+    let profile: ProfileData | undefined;
+    let credits: number | undefined;
+    let cursor: string | undefined;
+    let requests = 0;
+    for (let page = 0; page < maxPages; page++) {
+      const data = await this.request("/v3/tiktok/profile/videos", { handle, ...(cursor ? { max_cursor: cursor } : {}) });
+      requests++;
+      credits = typeof data.credits_remaining === "number" ? data.credits_remaining : credits;
+      const items = (data.aweme_list ?? []) as Json[];
+      if (!profile && items[0]) {
+        const a = (items[0].author ?? {}) as Json;
+        profile = {
+          handle,
+          displayName: str(a.nickname, a.unique_id),
+          avatarUrl: str(get(a, "avatar_larger.url_list.0"), get(a, "avatar_medium.url_list.0"), get(a, "avatar_thumb.url_list.0")),
+          profileUrl: profileUrlFor("TIKTOK", handle),
+          bio: str(a.signature),
+          followers: num(a.follower_count),
+        };
+      }
+      for (const it of items) {
         const stats = (it.statistics ?? it.stats ?? {}) as Json;
         const id = String(it.aweme_id ?? it.id ?? "");
-        return {
+        if (!id) continue;
+        posts.push({
           externalId: id,
-          url: str(it.share_url, it.url) ?? `https://www.tiktok.com/@${handle}/video/${id}`,
-          caption: str(it.desc, it.description),
-          thumbnailUrl: str(get(it, "video.cover.url_list.0"), get(it, "video.cover"), get(it, "video.dynamicCover")),
-          publishedAt: toDate(it.create_time ?? it.createTime),
-          views: num(stats.play_count, stats.playCount),
-          likes: num(stats.digg_count, stats.diggCount),
-          comments: num(stats.comment_count, stats.commentCount),
-          shares: num(stats.share_count, stats.shareCount),
-          saves: num(stats.collect_count, stats.collectCount),
-        };
-      });
+          url: str(it.share_url) ?? `https://www.tiktok.com/@${handle}/video/${id}`,
+          caption: str(it.desc),
+          thumbnailUrl: str(get(it, "video.cover.url_list.0"), get(it, "video.origin_cover.url_list.0"), get(it, "video.dynamic_cover.url_list.0")),
+          publishedAt: toDate(it.create_time),
+          views: num(stats.play_count),
+          likes: num(stats.digg_count),
+          comments: num(stats.comment_count),
+          shares: num(stats.share_count),
+          saves: num(stats.collect_count),
+        });
+      }
+      const oldest = items.at(-1);
+      const hasMore = data.has_more === 1 || data.has_more === true;
+      const next = data.max_cursor != null ? String(data.max_cursor) : undefined;
+      if (!hasMore || !next || items.length === 0 || (oldest && toDate(oldest.create_time) < lookback)) break;
+      cursor = next;
     }
-    const data = await this.request("/v2/instagram/user/posts", { handle });
-    const items = ((get(data, "items") ?? get(data, "posts") ?? get(data, "data") ?? []) as Json[]).slice(0, limit);
-    return items.map((it) => {
-      const code = str(it.code, it.shortcode) ?? String(it.id ?? it.pk ?? "");
-      const isVideo = (it.media_type === 2 || it.is_video === true) as boolean;
-      return {
-        externalId: String(it.pk ?? it.id ?? code),
-        url: isVideo ? `https://www.instagram.com/reel/${code}/` : `https://www.instagram.com/p/${code}/`,
-        caption: str(get(it, "caption.text"), it.caption),
-        thumbnailUrl: str(get(it, "image_versions2.candidates.0.url"), it.thumbnail_url, it.display_url),
-        publishedAt: toDate(it.taken_at ?? it.taken_at_timestamp),
-        views: num(it.play_count, it.view_count, it.video_view_count, it.ig_play_count),
-        likes: num(it.like_count, get(it, "edge_liked_by.count")),
-        comments: num(it.comment_count, get(it, "edge_media_to_comment.count")),
-        shares: num(it.reshare_count, it.share_count),
-        saves: num(it.save_count),
-      };
-    });
+    posts.sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime());
+    return { posts, profile, creditsRemaining: credits, requests };
+  }
+
+  private async instagramPosts(handle: string, maxPages: number, lookback: Date): Promise<PostsResult> {
+    const posts: PostData[] = [];
+    let credits: number | undefined;
+    let cursor: string | undefined;
+    let requests = 0;
+    for (let page = 0; page < maxPages; page++) {
+      const data = await this.request("/v2/instagram/user/posts", { handle, ...(cursor ? { next_max_id: cursor } : {}) });
+      requests++;
+      credits = typeof data.credits_remaining === "number" ? data.credits_remaining : credits;
+      const items = (data.items ?? []) as Json[];
+      for (const it of items) {
+        const code = str(it.code, it.shortcode) ?? String(it.id ?? it.pk ?? "");
+        const isVideo = it.media_type === 2 || it.is_video === true;
+        posts.push({
+          externalId: String(it.pk ?? it.id ?? code),
+          url: isVideo ? `https://www.instagram.com/reel/${code}/` : `https://www.instagram.com/p/${code}/`,
+          caption: str(get(it, "caption.text")),
+          thumbnailUrl: str(get(it, "image_versions2.candidates.0.url"), it.thumbnail_url, it.display_url),
+          publishedAt: toDate(it.taken_at ?? it.taken_at_timestamp),
+          views: num(it.play_count, it.ig_play_count, it.view_count, it.video_view_count),
+          likes: num(it.like_count),
+          comments: num(it.comment_count),
+          shares: num(it.reshare_count, it.share_count),
+          saves: num(it.save_count),
+        });
+      }
+      const oldest = items.at(-1);
+      const next = str(data.next_max_id) ?? undefined;
+      if (!data.more_available || !next || items.length === 0 || (oldest && toDate(oldest.taken_at) < lookback)) break;
+      cursor = next;
+    }
+    // Instagram ne renvoie pas les followers avec les posts : le profil reste un appel séparé.
+    posts.sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime());
+    return { posts, creditsRemaining: credits, requests };
   }
 }

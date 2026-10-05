@@ -1,5 +1,5 @@
 import type { Platform } from "@/generated/prisma/client";
-import { normalizeHandle, profileUrlFor, type FetchOptions, type PostData, type ProfileData, type SocialProvider } from "./types";
+import { normalizeHandle, profileUrlFor, type FetchOptions, type PostData, type PostsResult, type ProfileData, type SocialProvider } from "./types";
 
 /** Hash déterministe (FNV-1a) pour obtenir des données stables par handle. */
 function hash(str: string): number {
@@ -53,9 +53,15 @@ export class MockProvider implements SocialProvider {
     };
   }
 
-  async getRecentPosts(platform: Platform, rawHandle: string, options: FetchOptions = {}): Promise<PostData[]> {
+  async getRecentPosts(platform: Platform, rawHandle: string, options: FetchOptions = {}): Promise<PostsResult> {
+    const posts = await this.generatePosts(platform, rawHandle, options);
+    return { posts, requests: 0 };
+  }
+
+  /** Tous les posts (jusqu'à `limit`) à la date `asOf` : utilisé par le seed pour le backfill. */
+  async generatePosts(platform: Platform, rawHandle: string, options: FetchOptions & { limit?: number } = {}): Promise<PostData[]> {
     const handle = normalizeHandle(rawHandle);
-    const limit = options.limit ?? 40;
+    const limit = options.limit ?? (options.maxPages ?? 4) * 10;
     const now = options.asOf ?? new Date();
     const profile = await this.getProfile(platform, handle);
     const r = rng(hash(`${platform}:${handle}:posts`));
