@@ -68,16 +68,24 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
         </Card>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard title={`Vues sur ${days} j`} value={overview.viewsGained} previous={overview.viewsGainedPrev} hint="vs période précédente" />
-          <KpiCard title={`Likes sur ${days} j`} value={overview.likesGained} previous={overview.likesGainedPrev} hint="vs période précédente" />
-          <KpiCard title="Followers" value={overview.followers} hint={`${overview.followersGained >= 0 ? "+" : ""}${formatCompact(overview.followersGained)} sur ${days} j`} />
+          <KpiCard title={`Vues · posts des ${days} derniers jours`} value={overview.views} previous={overview.viewsPrev} hint="vs période précédente" />
+          <KpiCard title={`Likes · posts des ${days} derniers jours`} value={overview.likes} previous={overview.likesPrev} hint="vs période précédente" />
+          <KpiCard
+            title="Followers"
+            value={overview.followers}
+            hint={
+              overview.followersGained == null
+                ? "croissance visible au prochain rafraîchissement"
+                : `${overview.followersGained >= 0 ? "+" : ""}${formatCompact(overview.followersGained)} sur ${days} j`
+            }
+          />
           <KpiCard title="Posts publiés" value={overview.postsPublished} previous={overview.postsPublishedPrev} format={formatNumber} hint={`${formatCompact(overview.totalViews)} vues au total`} />
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle>Vues par jour</CardTitle>
-            <CardDescription>Vues gagnées quotidiennement par l’ensemble des posts du compte.</CardDescription>
+            <CardTitle>Vues par jour de publication</CardTitle>
+            <CardDescription>Vues cumulées des posts publiés chaque jour par ce compte.</CardDescription>
           </CardHeader>
           <CardContent>
             <ViewsChart data={overview.series} />

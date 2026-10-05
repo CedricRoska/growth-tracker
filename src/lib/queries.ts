@@ -85,21 +85,34 @@ function stateAt(snaps: Snap[], at: Date) {
   return { views, followers, likes, byAccount };
 }
 
+/**
+ * Définition des métriques « sur la période » (même logique que viral.app) :
+ * vues / likes / posts = contenu PUBLIÉ pendant la période, avec ses compteurs actuels.
+ * Disponible dès le premier rafraîchissement, sans historique. Les snapshots ne servent
+ * qu'à la croissance des followers (null tant qu'il n'y a pas de point de comparaison).
+ */
 export type Overview = {
   period: Period;
-  viewsGained: number;
-  viewsGainedPrev: number;
-  likesGained: number;
-  likesGainedPrev: number;
+  views: number;
+  viewsPrev: number;
+  likes: number;
+  likesPrev: number;
   followers: number;
-  followersGained: number;
-  followersGainedPrev: number;
+  /** null si aucun snapshot antérieur au début de la période (pas encore d'historique). */
+  followersGained: number | null;
   postsPublished: number;
   postsPublishedPrev: number;
   totalViews: number;
   accounts: number;
+  /** Vues / likes des posts par jour de publication. */
   series: SeriesPoint[];
 };
+
+type PostMetric = { publishedAt: Date; views: number; likes: number };
+
+function sumMetrics(posts: PostMetric[]) {
+  return posts.reduce((acc, p) => ({ views: acc.views + p.views, likes: acc.likes + p.likes }), { views: 0, likes: 0 });
+}
 
 export async function getOverview(f: Filters): Promise<Overview> {
   const now = new Date();
@@ -107,51 +120,52 @@ export async function getOverview(f: Filters): Promise<Overview> {
   const prevStart = new Date(start.getTime() - f.days * DAY);
   const where = accountWhere(f);
 
-  const [snaps, postsPublished, postsPublishedPrev, accounts, totals] = await Promise.all([
+  const [posts, prevPosts, snaps, accountsList, totals] = await Promise.all([
+    prisma.post.findMany({ where: { account: where, publishedAt: { gte: start } }, select: { publishedAt: true, views: true, likes: true } }),
+    prisma.post.findMany({ where: { account: where, publishedAt: { gte: prevStart, lt: start } }, select: { publishedAt: true, views: true, likes: true } }),
     prisma.accountSnapshot.findMany({
       where: { account: where },
       orderBy: { capturedAt: "asc" },
       select: { accountId: true, capturedAt: true, followers: true, totalViews: true, totalLikes: true },
     }),
-    prisma.post.count({ where: { account: where, publishedAt: { gte: start } } }),
-    prisma.post.count({ where: { account: where, publishedAt: { gte: prevStart, lt: start } } }),
-    prisma.account.count({ where }),
+    prisma.account.findMany({ where, select: { followers: true } }),
     prisma.post.aggregate({ where: { account: where }, _sum: { views: true } }),
   ]);
 
-  const nowState = stateAt(snaps, now);
+  const cur = sumMetrics(posts);
+  const prev = sumMetrics(prevPosts);
+  const followers = accountsList.reduce((s, a) => s + a.followers, 0);
   const startState = stateAt(snaps, start);
-  const prevState = stateAt(snaps, prevStart);
+  const hasHistory = startState.byAccount.size > 0;
 
-  // Série journalière : état cumulé à la fin de chaque jour, puis delta jour/jour.
-  const series: SeriesPoint[] = [];
-  let prevDay = stateAt(snaps, start);
-  for (let i = 1; i <= f.days; i++) {
-    const dayEnd = new Date(start.getTime() + i * DAY);
-    const st = stateAt(snaps, dayEnd);
-    series.push({
-      date: dayEnd.toISOString().slice(0, 10),
-      views: Math.max(0, st.views - prevDay.views),
-      likes: Math.max(0, st.likes - prevDay.likes),
-      followers: st.followers,
-    });
-    prevDay = st;
+  // Série : un point par jour de la période, vues / likes des posts publiés ce jour-là.
+  const buckets = new Map<string, SeriesPoint>();
+  for (let i = 0; i < f.days; i++) {
+    const day = new Date(start.getTime() + (i + 1) * DAY).toISOString().slice(0, 10);
+    buckets.set(day, { date: day, views: 0, likes: 0, followers });
+  }
+  for (const p of posts) {
+    const day = p.publishedAt.toISOString().slice(0, 10);
+    const b = buckets.get(day);
+    if (b) {
+      b.views += p.views;
+      b.likes += p.likes;
+    }
   }
 
   return {
     period: f.days,
-    viewsGained: Math.max(0, nowState.views - startState.views),
-    viewsGainedPrev: Math.max(0, startState.views - prevState.views),
-    likesGained: Math.max(0, nowState.likes - startState.likes),
-    likesGainedPrev: Math.max(0, startState.likes - prevState.likes),
-    followers: nowState.followers,
-    followersGained: nowState.followers - startState.followers,
-    followersGainedPrev: startState.followers - prevState.followers,
-    postsPublished,
-    postsPublishedPrev,
+    views: cur.views,
+    viewsPrev: prev.views,
+    likes: cur.likes,
+    likesPrev: prev.likes,
+    followers,
+    followersGained: hasHistory ? followers - startState.followers : null,
+    postsPublished: posts.length,
+    postsPublishedPrev: prevPosts.length,
     totalViews: totals._sum.views ?? 0,
-    accounts,
-    series,
+    accounts: accountsList.length,
+    series: [...buckets.values()],
   };
 }
 
@@ -165,8 +179,11 @@ export type AccountRow = {
   ownership: Ownership;
   creator: { id: string; name: string } | null;
   followers: number;
-  followersGained: number;
-  viewsGained: number;
+  /** null sans historique de snapshots. */
+  followersGained: number | null;
+  /** Vues des posts publiés sur la période. */
+  viewsInPeriod: number;
+  likesInPeriod: number;
   totalViews: number;
   postsInPeriod: number;
   syncStatus: string;
@@ -194,15 +211,18 @@ export async function getAccountsLeaderboard(f: Filters): Promise<AccountRow[]> 
       by: ["accountId"],
       where: { account: where, publishedAt: { gte: start } },
       _count: { _all: true },
+      _sum: { views: true, likes: true },
     }),
   ]);
-  const nowState = stateAt(snaps, now).byAccount;
   const startState = stateAt(snaps, start).byAccount;
-  const counts = new Map(postCounts.map((c) => [c.accountId, c._count._all]));
+  const periodStats = new Map(postCounts.map((c) => [c.accountId, c]));
+  const totalViewsByAccount = new Map(
+    (await prisma.post.groupBy({ by: ["accountId"], where: { account: where }, _sum: { views: true } })).map((c) => [c.accountId, c._sum.views ?? 0]),
+  );
   return accounts
     .map((a) => {
-      const cur = nowState.get(a.id);
       const base = startState.get(a.id);
+      const stats = periodStats.get(a.id);
       return {
         id: a.id,
         platform: a.platform,
@@ -213,17 +233,18 @@ export async function getAccountsLeaderboard(f: Filters): Promise<AccountRow[]> 
         ownership: a.ownership,
         creator: a.creator,
         followers: a.followers,
-        followersGained: (cur?.followers ?? a.followers) - (base?.followers ?? 0),
-        viewsGained: Math.max(0, (cur?.totalViews ?? 0) - (base?.totalViews ?? 0)),
-        totalViews: cur?.totalViews ?? 0,
-        postsInPeriod: counts.get(a.id) ?? 0,
+        followersGained: base ? a.followers - base.followers : null,
+        viewsInPeriod: stats?._sum.views ?? 0,
+        likesInPeriod: stats?._sum.likes ?? 0,
+        totalViews: totalViewsByAccount.get(a.id) ?? 0,
+        postsInPeriod: stats?._count._all ?? 0,
         syncStatus: a.syncStatus,
         syncError: a.syncError,
         lastSyncedAt: a.lastSyncedAt,
         isActive: a.isActive,
       };
     })
-    .sort((x, y) => y.viewsGained - x.viewsGained);
+    .sort((x, y) => y.viewsInPeriod - x.viewsInPeriod);
 }
 
 export type PostRow = {
@@ -281,7 +302,7 @@ export type CreatorRow = {
   ownership: Ownership;
   accounts: number;
   followers: number;
-  viewsGained: number;
+  viewsInPeriod: number;
   postsInPeriod: number;
   platforms: Platform[];
 };
@@ -298,18 +319,18 @@ export async function getCreatorsLeaderboard(f: Filters, workspaceName: string):
       ownership: r.ownership,
       accounts: 0,
       followers: 0,
-      viewsGained: 0,
+      viewsInPeriod: 0,
       postsInPeriod: 0,
       platforms: [],
     };
     g.accounts += 1;
     g.followers += r.followers;
-    g.viewsGained += r.viewsGained;
+    g.viewsInPeriod += r.viewsInPeriod;
     g.postsInPeriod += r.postsInPeriod;
     if (!g.platforms.includes(r.platform)) g.platforms.push(r.platform);
     groups.set(key, g);
   }
-  return [...groups.values()].sort((a, b) => b.viewsGained - a.viewsGained);
+  return [...groups.values()].sort((a, b) => b.viewsInPeriod - a.viewsInPeriod);
 }
 
 export async function getAccountDetail(workspaceId: string, accountId: string, days: Period) {
@@ -331,4 +352,14 @@ export async function getCreators(workspaceId: string) {
 
 export async function getLastSyncRun(workspaceId: string) {
   return prisma.syncRun.findFirst({ where: { workspaceId }, orderBy: { startedAt: "desc" } });
+}
+
+/** Dernier rafraîchissement effectif (ajout de compte compris) + comptes en erreur. */
+export async function getSyncStatus(workspaceId: string) {
+  const [latest, running, failed] = await Promise.all([
+    prisma.account.findFirst({ where: { workspaceId, lastSyncedAt: { not: null } }, orderBy: { lastSyncedAt: "desc" }, select: { lastSyncedAt: true } }),
+    prisma.account.count({ where: { workspaceId, syncStatus: "RUNNING" } }),
+    prisma.account.count({ where: { workspaceId, syncStatus: "ERROR" } }),
+  ]);
+  return { at: latest?.lastSyncedAt ?? null, running, failed };
 }

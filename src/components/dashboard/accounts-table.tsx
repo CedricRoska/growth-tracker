@@ -56,11 +56,11 @@ export function AccountsTable({ accounts, compact = false }: { accounts: Account
                 <OwnershipBadge ownership={a.ownership} creatorName={a.creator?.name} />
               </TableCell>
             )}
-            <TableCell className="text-right font-medium tabular-nums">{formatCompact(a.viewsGained)}</TableCell>
+            <TableCell className="text-right font-medium tabular-nums">{formatCompact(a.viewsInPeriod)}</TableCell>
             <TableCell className="hidden text-right tabular-nums sm:table-cell">{a.postsInPeriod}</TableCell>
             <TableCell className="hidden text-right tabular-nums md:table-cell">
               {formatCompact(a.followers)}
-              {a.followersGained !== 0 && (
+              {a.followersGained != null && a.followersGained !== 0 && (
                 <span className={`ml-1 text-xs ${a.followersGained > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600"}`}>
                   {a.followersGained > 0 ? "+" : ""}
                   {formatCompact(a.followersGained)}

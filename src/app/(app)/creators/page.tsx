@@ -32,7 +32,7 @@ export default async function CreatorsPage({ searchParams }: { searchParams: Pro
         <Card className="xl:col-span-2">
           <CardHeader>
             <CardTitle>Classement</CardTitle>
-            <CardDescription>Vues gagnées sur {filters.days} jours, tous comptes confondus. Les comptes internes sont regroupés sous « {workspace.name} ».</CardDescription>
+            <CardDescription>Vues des posts publiés sur {filters.days} jours, tous comptes confondus. Les comptes internes sont regroupés sous « {workspace.name} ».</CardDescription>
           </CardHeader>
           <CardContent className="px-0">
             {leaderboard.length === 0 ? (
@@ -67,11 +67,11 @@ export default async function CreatorsPage({ searchParams }: { searchParams: Pro
                           ))}
                         </div>
                       </TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">{formatCompact(c.viewsGained)}</TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">{formatCompact(c.viewsInPeriod)}</TableCell>
                       <TableCell className="hidden text-right tabular-nums sm:table-cell">{c.postsInPeriod}</TableCell>
                       <TableCell className="hidden text-right tabular-nums md:table-cell">{formatCompact(c.followers)}</TableCell>
                       <TableCell className="hidden text-right tabular-nums text-muted-foreground md:table-cell">
-                        {c.postsInPeriod ? formatCompact(Math.round(c.viewsGained / c.postsInPeriod)) : "–"}
+                        {c.postsInPeriod ? formatCompact(Math.round(c.viewsInPeriod / c.postsInPeriod)) : "–"}
                       </TableCell>
                     </TableRow>
                   ))}

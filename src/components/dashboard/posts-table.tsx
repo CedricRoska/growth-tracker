@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PlatformIcon } from "@/components/dashboard/platform-badge";
+import { Thumb } from "@/components/dashboard/thumb";
 import { engagementRate, formatCompact, formatDate, formatPercent } from "@/lib/format";
 import type { PostRow } from "@/lib/queries";
 
@@ -38,12 +39,7 @@ export function PostsTable({ posts, showAccount = true, compact = false, emptyLa
             <TableCell className="text-muted-foreground tabular-nums">{i + 1}</TableCell>
             <TableCell className="max-w-[320px]">
               <a href={p.url} target="_blank" rel="noreferrer" className="group flex items-center gap-3">
-                <div className="relative h-14 w-10 shrink-0 overflow-hidden rounded-md bg-muted">
-                  {p.thumbnailUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.thumbnailUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
-                  ) : null}
-                </div>
+                <Thumb src={p.thumbnailUrl} platform={p.account.platform} />
                 <div className="min-w-0">
                   <p className="truncate text-sm group-hover:underline">{p.caption || "(sans légende)"}</p>
                   <p className="flex items-center gap-1 text-xs text-muted-foreground">
