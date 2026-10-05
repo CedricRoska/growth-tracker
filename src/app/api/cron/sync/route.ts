@@ -18,7 +18,7 @@ export async function GET(request: Request) {
   const workspaces = await prisma.workspace.findMany({ select: { id: true, slug: true } });
   const summary = [];
   for (const ws of workspaces) {
-    const { results } = await syncWorkspace(ws.id, "cron");
+    const { results } = await syncWorkspace(ws.id, "cron", "deep");
     summary.push({ workspace: ws.slug, synced: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length });
   }
   return NextResponse.json({ ok: true, at: new Date().toISOString(), summary });

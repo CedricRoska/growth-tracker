@@ -72,12 +72,22 @@ export function profileUrlFor(platform: Platform, handle: string): string {
   return platform === "TIKTOK" ? `https://www.tiktok.com/@${h}` : `https://www.instagram.com/${h}/`;
 }
 
-/** Réglages de synchro lus dans l'environnement (coût = maxPages (+1 si profil séparé) crédits / compte). */
-export function syncSettings(): Required<Pick<FetchOptions, "maxPages" | "lookbackDays">> {
-  const maxPages = Number(process.env.SYNC_MAX_PAGES);
-  const lookbackDays = Number(process.env.SYNC_LOOKBACK_DAYS);
+/**
+ * Deux niveaux de rafraîchissement :
+ * - quick : les posts des derniers jours (SYNC_QUICK_DAYS, défaut 7). 1 à 2 pages par compte.
+ * - deep  : remet à jour tout l'historique récent (SYNC_DEEP_DAYS, défaut 30). Plusieurs pages.
+ * SYNC_MAX_PAGES (défaut 10) borne le coût d'un compte très actif. 1 page = 1 crédit.
+ */
+export type SyncMode = "quick" | "deep";
+
+function envInt(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+export function syncSettings(mode: SyncMode = "quick"): Required<Pick<FetchOptions, "maxPages" | "lookbackDays">> {
   return {
-    maxPages: Number.isFinite(maxPages) && maxPages > 0 ? Math.floor(maxPages) : 3,
-    lookbackDays: Number.isFinite(lookbackDays) && lookbackDays > 0 ? Math.floor(lookbackDays) : 90,
+    maxPages: envInt("SYNC_MAX_PAGES", 10),
+    lookbackDays: mode === "deep" ? envInt("SYNC_DEEP_DAYS", 30) : envInt("SYNC_QUICK_DAYS", 7),
   };
 }

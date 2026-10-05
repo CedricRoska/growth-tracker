@@ -10,7 +10,7 @@ Inspiré de viral.app. Premier usage : Loucio.
 - **Comptes** : leaderboard des comptes par vues gagnées, ajout d’un compte en un clic (le profil et ses posts sont récupérés immédiatement).
 - **Posts** : tous les posts de la période, triés par vues, likes, engagement ou date.
 - **Créateurs** : classement par créateur (les comptes internes sont regroupés), annuaire avec notes.
-- **Rafraîchissement à la demande** (comme PostHog) : un bouton « Rafraîchir » sur chaque page relance la collecte. Pas de synchro automatique, donc pas de coût API quand personne ne regarde. Chaque rafraîchissement prend un snapshot des métriques, ce qui permet de calculer les vues *gagnées* sur une période ; les courbes sont interpolées entre deux rafraîchissements.
+- **Rafraîchissement à la demande** (comme PostHog), à deux niveaux : « Rafraîchir » récupère les posts des 7 derniers jours (1 à 2 crédits API par compte), « Rafraîchir complet » remet à jour 30 jours d’historique (3 à 4 crédits par compte). Pas de synchro automatique, donc pas de coût quand personne ne regarde. Les crédits restants sont affichés dans l’en-tête. Chaque rafraîchissement prend un snapshot des métriques, ce qui permet de calculer les vues *gagnées* sur une période ; les courbes sont interpolées entre deux rafraîchissements.
 - Filtres partout : période, plateforme, type de compte (interne / créateur), créateur.
 
 ## Stack
