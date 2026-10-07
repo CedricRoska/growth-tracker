@@ -24,6 +24,10 @@ Premier client : Loucio (le fondateur et son associé). Langue de l'UI : frança
 - `npm run provider:check [handle]` : teste le provider configuré sur un vrai compte (mapping validé sur ScrapeCreators le 2026-10-05 ; Instagram ne fournit ni partages ni saves).
 - `npm run db:migrate` (local) · `npm run db:deploy` (prod) · `npm run db:seed` (démo : 8 comptes, 45 jours d'historique)
 
+## Documents
+- `docs/analyse-concurrence.md` : viral.app, Whop, ClipAffiliates / Vyro vs Growth Tracker, et ce qu il manque.
+- `docs/valeur-produit.md` : réflexion produit (comprendre, décider, rémunérer, relier au business) et priorités.
+
 ## Conventions
 - Tout accès données passe par `requireSession()` et filtre par `workspaceId` (multi-tenant dès le départ).
 - Composants serveur par défaut ; `"use client"` seulement pour interactions (filtres, dialogs, charts).
