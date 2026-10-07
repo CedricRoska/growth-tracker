@@ -43,13 +43,10 @@ function get(obj: unknown, path: string): unknown {
  * Chrome / Firefox) ou avec une extension générique `.image` : on préfère un JPEG / PNG / WebP.
  */
 function pickImage(...lists: unknown[]): string | null {
-  for (const list of lists) {
-    if (!Array.isArray(list)) continue;
-    const urls = list.filter((u): u is string => typeof u === "string" && u.trim() !== "");
-    if (urls.length === 0) continue;
-    return urls.find((u) => /\.(jpe?g|png|webp)(\?|$)/i.test(u)) ?? urls.at(-1) ?? null;
-  }
-  return null;
+  const urls = lists.flatMap((list) => (Array.isArray(list) ? list : [])).filter((u): u is string => typeof u === "string" && u.trim() !== "");
+  if (urls.length === 0) return null;
+  // Un JPEG / PNG / WebP dans n'importe quelle liste, sinon la dernière URL (les premières sont en HEIC).
+  return urls.find((u) => /\.(jpe?g|png|webp)(\?|$)/i.test(u)) ?? urls.at(-1) ?? null;
 }
 function toDate(v: unknown): Date {
   if (typeof v === "number") return new Date(v < 1e12 ? v * 1000 : v);

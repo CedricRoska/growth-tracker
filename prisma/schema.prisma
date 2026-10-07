@@ -70,6 +70,8 @@ model Account {
   handle       String
   displayName  String?
   avatarUrl    String?
+  /// Chemin (sans signature) de l image d origine de l avatar mis en cache dans avatarUrl.
+  avatarSource String?
   profileUrl   String?
   bio          String?
   ownership    Ownership  @default(OWNED)
@@ -96,6 +98,8 @@ model Post {
   url          String
   caption      String?
   thumbnailUrl String?
+  /// Chemin (sans signature) de la vignette d origine mise en cache dans thumbnailUrl.
+  thumbnailSource String?
   publishedAt  DateTime
   views        Int      @default(0)
   likes        Int      @default(0)
