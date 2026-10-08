@@ -18,7 +18,7 @@ export function AccountsTable({ accounts, compact = false }: { accounts: Account
           <TableHead className="w-10">#</TableHead>
           <TableHead>Compte</TableHead>
           {!compact && <TableHead className="hidden md:table-cell">Type</TableHead>}
-          <TableHead className="text-right">Vues période</TableHead>
+          <TableHead className="text-right">Vues gagnées</TableHead>
           <TableHead className="hidden text-right sm:table-cell">Posts</TableHead>
           <TableHead className="hidden text-right md:table-cell">Followers</TableHead>
           {!compact && <TableHead className="hidden text-right lg:table-cell">Synchro</TableHead>}

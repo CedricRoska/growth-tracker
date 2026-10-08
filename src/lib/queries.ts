@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
-import type { Ownership, Platform, Prisma } from "@/generated/prisma/client";
+import { Prisma, type Ownership, type Platform } from "@/generated/prisma/client";
 import { PERIODS, type Period, type SeriesPoint } from "@/lib/periods";
+import { buildSegments, dailySeries, roundMetrics, sumBy, sumSegments, ZERO, type Metrics, type Segment, type SnapshotRow } from "@/lib/accrual";
 
 export { PERIODS, type Period, type SeriesPoint };
 
@@ -42,54 +43,90 @@ function accountWhere(f: Filters): Prisma.AccountWhereInput {
   };
 }
 
-type Snap = { accountId: string; capturedAt: Date; followers: number; totalViews: number; totalLikes: number };
+// ---------------------------------------------------------------------------
+// Chargement des photos de compteurs → segments de gain (voir src/lib/accrual.ts)
+// ---------------------------------------------------------------------------
+
+type Loaded = {
+  segments: Segment[];
+  posts: { id: string; accountId: string; publishedAt: Date }[];
+  /** Dates de rafraîchissement par compte, triées. */
+  syncTimes: Map<string, number[]>;
+  /** Nombre de rafraîchissements distincts (heures distinctes) dans [start, now]. */
+  syncsInPeriod: number;
+};
 
 /**
- * État de chaque compte à l'instant `at` (snapshots triés par date croissante).
- * Les données ne sont rafraîchies qu'à la demande : entre deux snapshots, on interpole
- * linéairement pour que les courbes journalières restent lisibles (sinon tout le gain
- * tomberait sur le jour du rafraîchissement). Avant le premier snapshot : 0.
+ * Charge les posts des comptes filtrés, leurs photos depuis `since` plus, pour chaque post,
+ * la dernière photo antérieure (base de calcul), et construit les segments de gain.
  */
-function stateAt(snaps: Snap[], at: Date) {
+async function loadSegments(f: Filters, since: Date, start: Date): Promise<Loaded> {
+  const where = accountWhere(f);
+  const [posts, accountSnaps] = await Promise.all([
+    prisma.post.findMany({ where: { account: where }, select: { id: true, accountId: true, publishedAt: true } }),
+    prisma.accountSnapshot.findMany({ where: { account: where }, orderBy: { capturedAt: "asc" }, select: { accountId: true, capturedAt: true } }),
+  ]);
+  const syncTimes = new Map<string, number[]>();
+  const periodSyncs = new Set<number>();
+  for (const s of accountSnaps) {
+    const t = s.capturedAt.getTime();
+    const list = syncTimes.get(s.accountId);
+    if (list) list.push(t);
+    else syncTimes.set(s.accountId, [t]);
+    if (t >= start.getTime()) periodSyncs.add(Math.floor(t / 3_600_000)); // un rafraîchissement = une heure distincte
+  }
+  if (posts.length === 0) return { segments: [], posts, syncTimes, syncsInPeriod: periodSyncs.size };
+
+  const ids = posts.map((p) => p.id);
+  const select = { postId: true, capturedAt: true, views: true, likes: true, comments: true, shares: true, saves: true } as const;
+  const [recent, baseline] = await Promise.all([
+    prisma.postSnapshot.findMany({ where: { postId: { in: ids }, capturedAt: { gte: since } }, select }),
+    prisma.$queryRaw<SnapshotRow[]>`
+      SELECT DISTINCT ON ("postId") "postId", "capturedAt", "views", "likes", "comments", "shares", "saves"
+      FROM "PostSnapshot"
+      WHERE "postId" IN (${Prisma.join(ids)}) AND "capturedAt" < ${since}
+      ORDER BY "postId", "capturedAt" DESC`,
+  ]);
+  const segments = buildSegments(posts, [...baseline, ...recent], syncTimes);
+  return { segments, posts, syncTimes, syncsInPeriod: periodSyncs.size };
+}
+
+// ---------------------------------------------------------------------------
+// Followers : dernier état connu par compte (interpolé entre deux photos)
+// ---------------------------------------------------------------------------
+
+type FollowerSnap = { accountId: string; capturedAt: Date; followers: number };
+
+function followersAt(snaps: FollowerSnap[], at: Date) {
   const t = at.getTime();
-  const before = new Map<string, Snap>();
-  const after = new Map<string, Snap>();
+  const before = new Map<string, FollowerSnap>();
+  const after = new Map<string, FollowerSnap>();
   for (const s of snaps) {
     if (s.capturedAt.getTime() <= t) before.set(s.accountId, s);
     else if (!after.has(s.accountId)) after.set(s.accountId, s);
   }
-  const byAccount = new Map<string, Snap>();
-  let views = 0;
-  let followers = 0;
-  let likes = 0;
+  const byAccount = new Map<string, number>();
   for (const [accountId, b] of before) {
     const a = after.get(accountId);
-    let state = b;
+    let value = b.followers;
     if (a) {
       const span = a.capturedAt.getTime() - b.capturedAt.getTime();
       const ratio = span > 0 ? (t - b.capturedAt.getTime()) / span : 0;
-      const lerp = (x: number, y: number) => Math.round(x + (y - x) * ratio);
-      state = {
-        accountId,
-        capturedAt: at,
-        followers: lerp(b.followers, a.followers),
-        totalViews: lerp(b.totalViews, a.totalViews),
-        totalLikes: lerp(b.totalLikes, a.totalLikes),
-      };
+      value = Math.round(b.followers + (a.followers - b.followers) * ratio);
     }
-    byAccount.set(accountId, state);
-    views += state.totalViews;
-    followers += state.followers;
-    likes += state.totalLikes;
+    byAccount.set(accountId, value);
   }
-  return { views, followers, likes, byAccount };
+  return byAccount;
 }
 
+// ---------------------------------------------------------------------------
+// Vue d'ensemble
+// ---------------------------------------------------------------------------
+
 /**
- * Définition des métriques « sur la période » (même logique que viral.app) :
- * vues / likes / posts = contenu PUBLIÉ pendant la période, avec ses compteurs actuels.
- * Disponible dès le premier rafraîchissement, sans historique. Les snapshots ne servent
- * qu'à la croissance des followers (null tant qu'il n'y a pas de point de comparaison).
+ * Métriques « sur la période » = vues / likes GAGNÉS pendant la période, quel que soit l'âge
+ * des posts (méthode viral.app). Nécessite au moins deux rafraîchissements dans la période
+ * pour être précis ; `syncsInPeriod` permet de l'indiquer à l'utilisateur.
  */
 export type Overview = {
   period: Period;
@@ -98,21 +135,16 @@ export type Overview = {
   likes: number;
   likesPrev: number;
   followers: number;
-  /** null si aucun snapshot antérieur au début de la période (pas encore d'historique). */
+  /** null si aucun snapshot antérieur au début de la période. */
   followersGained: number | null;
   postsPublished: number;
   postsPublishedPrev: number;
   totalViews: number;
   accounts: number;
-  /** Vues / likes des posts par jour de publication. */
+  syncsInPeriod: number;
+  /** Vues / likes gagnés chaque jour. */
   series: SeriesPoint[];
 };
-
-type PostMetric = { publishedAt: Date; views: number; likes: number };
-
-function sumMetrics(posts: PostMetric[]) {
-  return posts.reduce((acc, p) => ({ views: acc.views + p.views, likes: acc.likes + p.likes }), { views: 0, likes: 0 });
-}
 
 export async function getOverview(f: Filters): Promise<Overview> {
   const now = new Date();
@@ -120,38 +152,22 @@ export async function getOverview(f: Filters): Promise<Overview> {
   const prevStart = new Date(start.getTime() - f.days * DAY);
   const where = accountWhere(f);
 
-  const [posts, prevPosts, snaps, accountsList, totals] = await Promise.all([
-    prisma.post.findMany({ where: { account: where, publishedAt: { gte: start } }, select: { publishedAt: true, views: true, likes: true } }),
-    prisma.post.findMany({ where: { account: where, publishedAt: { gte: prevStart, lt: start } }, select: { publishedAt: true, views: true, likes: true } }),
-    prisma.accountSnapshot.findMany({
-      where: { account: where },
-      orderBy: { capturedAt: "asc" },
-      select: { accountId: true, capturedAt: true, followers: true, totalViews: true, totalLikes: true },
-    }),
-    prisma.account.findMany({ where, select: { followers: true } }),
+  const [loaded, postsPublished, postsPublishedPrev, followerSnaps, accountsList, totals] = await Promise.all([
+    loadSegments(f, prevStart, start),
+    prisma.post.count({ where: { account: where, publishedAt: { gte: start } } }),
+    prisma.post.count({ where: { account: where, publishedAt: { gte: prevStart, lt: start } } }),
+    prisma.accountSnapshot.findMany({ where: { account: where }, orderBy: { capturedAt: "asc" }, select: { accountId: true, capturedAt: true, followers: true } }),
+    prisma.account.findMany({ where, select: { id: true, followers: true } }),
     prisma.post.aggregate({ where: { account: where }, _sum: { views: true } }),
   ]);
 
-  const cur = sumMetrics(posts);
-  const prev = sumMetrics(prevPosts);
+  const cur = roundMetrics(sumSegments(loaded.segments, start.getTime(), now.getTime()));
+  const prev = roundMetrics(sumSegments(loaded.segments, prevStart.getTime(), start.getTime()));
   const followers = accountsList.reduce((s, a) => s + a.followers, 0);
-  const startState = stateAt(snaps, start);
-  const hasHistory = startState.byAccount.size > 0;
-
-  // Série : un point par jour de la période, vues / likes des posts publiés ce jour-là.
-  const buckets = new Map<string, SeriesPoint>();
-  for (let i = 0; i < f.days; i++) {
-    const day = new Date(start.getTime() + (i + 1) * DAY).toISOString().slice(0, 10);
-    buckets.set(day, { date: day, views: 0, likes: 0, followers });
-  }
-  for (const p of posts) {
-    const day = p.publishedAt.toISOString().slice(0, 10);
-    const b = buckets.get(day);
-    if (b) {
-      b.views += p.views;
-      b.likes += p.likes;
-    }
-  }
+  const base = followersAt(followerSnaps, start);
+  const hasHistory = base.size > 0;
+  const followersBase = [...base.values()].reduce((s, v) => s + v, 0);
+  const series = dailySeries(loaded.segments, start.getTime(), f.days).map((p) => ({ ...p, followers }));
 
   return {
     period: f.days,
@@ -160,14 +176,19 @@ export async function getOverview(f: Filters): Promise<Overview> {
     likes: cur.likes,
     likesPrev: prev.likes,
     followers,
-    followersGained: hasHistory ? followers - startState.followers : null,
-    postsPublished: posts.length,
-    postsPublishedPrev: prevPosts.length,
+    followersGained: hasHistory ? followers - followersBase : null,
+    postsPublished,
+    postsPublishedPrev,
     totalViews: totals._sum.views ?? 0,
     accounts: accountsList.length,
-    series: [...buckets.values()],
+    syncsInPeriod: loaded.syncsInPeriod,
+    series,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Comptes
+// ---------------------------------------------------------------------------
 
 export type AccountRow = {
   id: string;
@@ -181,7 +202,7 @@ export type AccountRow = {
   followers: number;
   /** null sans historique de snapshots. */
   followersGained: number | null;
-  /** Vues des posts publiés sur la période. */
+  /** Vues gagnées sur la période. */
   viewsInPeriod: number;
   likesInPeriod: number;
   totalViews: number;
@@ -196,33 +217,21 @@ export async function getAccountsLeaderboard(f: Filters): Promise<AccountRow[]> 
   const now = new Date();
   const start = new Date(now.getTime() - f.days * DAY);
   const where = accountWhere(f);
-  const [accounts, snaps, postCounts] = await Promise.all([
-    prisma.account.findMany({
-      where,
-      include: { creator: { select: { id: true, name: true } } },
-      orderBy: { createdAt: "asc" },
-    }),
-    prisma.accountSnapshot.findMany({
-      where: { account: where },
-      orderBy: { capturedAt: "asc" },
-      select: { accountId: true, capturedAt: true, followers: true, totalViews: true, totalLikes: true },
-    }),
-    prisma.post.groupBy({
-      by: ["accountId"],
-      where: { account: where, publishedAt: { gte: start } },
-      _count: { _all: true },
-      _sum: { views: true, likes: true },
-    }),
+  const [accounts, loaded, followerSnaps, postCounts, totals] = await Promise.all([
+    prisma.account.findMany({ where, include: { creator: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }),
+    loadSegments(f, new Date(start.getTime() - DAY), start),
+    prisma.accountSnapshot.findMany({ where: { account: where }, orderBy: { capturedAt: "asc" }, select: { accountId: true, capturedAt: true, followers: true } }),
+    prisma.post.groupBy({ by: ["accountId"], where: { account: where, publishedAt: { gte: start } }, _count: { _all: true } }),
+    prisma.post.groupBy({ by: ["accountId"], where: { account: where }, _sum: { views: true } }),
   ]);
-  const startState = stateAt(snaps, start).byAccount;
-  const periodStats = new Map(postCounts.map((c) => [c.accountId, c]));
-  const totalViewsByAccount = new Map(
-    (await prisma.post.groupBy({ by: ["accountId"], where: { account: where }, _sum: { views: true } })).map((c) => [c.accountId, c._sum.views ?? 0]),
-  );
+  const gained = sumBy(loaded.segments, "accountId", start.getTime(), now.getTime());
+  const base = followersAt(followerSnaps, start);
+  const counts = new Map(postCounts.map((c) => [c.accountId, c._count._all]));
+  const totalViews = new Map(totals.map((c) => [c.accountId, c._sum.views ?? 0]));
   return accounts
     .map((a) => {
-      const base = startState.get(a.id);
-      const stats = periodStats.get(a.id);
+      const g = gained.get(a.id) ?? ZERO;
+      const b = base.get(a.id);
       return {
         id: a.id,
         platform: a.platform,
@@ -233,11 +242,11 @@ export async function getAccountsLeaderboard(f: Filters): Promise<AccountRow[]> 
         ownership: a.ownership,
         creator: a.creator,
         followers: a.followers,
-        followersGained: base ? a.followers - base.followers : null,
-        viewsInPeriod: stats?._sum.views ?? 0,
-        likesInPeriod: stats?._sum.likes ?? 0,
-        totalViews: totalViewsByAccount.get(a.id) ?? 0,
-        postsInPeriod: stats?._count._all ?? 0,
+        followersGained: b != null ? a.followers - b : null,
+        viewsInPeriod: Math.round(g.views),
+        likesInPeriod: Math.round(g.likes),
+        totalViews: totalViews.get(a.id) ?? 0,
+        postsInPeriod: counts.get(a.id) ?? 0,
         syncStatus: a.syncStatus,
         syncError: a.syncError,
         lastSyncedAt: a.lastSyncedAt,
@@ -247,17 +256,24 @@ export async function getAccountsLeaderboard(f: Filters): Promise<AccountRow[]> 
     .sort((x, y) => y.viewsInPeriod - x.viewsInPeriod);
 }
 
+// ---------------------------------------------------------------------------
+// Posts
+// ---------------------------------------------------------------------------
+
 export type PostRow = {
   id: string;
   url: string;
   caption: string | null;
   thumbnailUrl: string | null;
   publishedAt: Date;
+  /** Compteurs actuels (cumul depuis la publication). */
   views: number;
   likes: number;
   comments: number;
   shares: number;
   saves: number;
+  /** Gagné sur la période. */
+  gained: Metrics;
   account: {
     id: string;
     handle: string;
@@ -270,31 +286,44 @@ export type PostRow = {
 
 export type PostSort = "views" | "likes" | "engagement" | "recent";
 
-export async function getTopPosts(
-  f: Filters,
-  opts: { limit?: number; sort?: PostSort; allTime?: boolean } = {},
-): Promise<PostRow[]> {
-  const { limit = 10, sort = "views", allTime = false } = opts;
-  const start = new Date(Date.now() - f.days * DAY);
-  const posts = await prisma.post.findMany({
-    where: { account: accountWhere(f), ...(allTime ? {} : { publishedAt: { gte: start } }) },
-    orderBy: sort === "recent" ? { publishedAt: "desc" } : sort === "likes" ? { likes: "desc" } : { views: "desc" },
-    take: sort === "engagement" ? 500 : limit,
-    include: {
-      account: {
-        select: { id: true, handle: true, platform: true, avatarUrl: true, ownership: true, creator: { select: { name: true } } },
-      },
-    },
-  });
-  if (sort === "engagement") {
-    const er = (p: PostRow) => (p.likes + p.comments + p.shares + p.saves) / p.views;
-    return posts
-      .filter((p) => p.views >= 1000)
-      .sort((a, b) => er(b) - er(a))
-      .slice(0, limit);
+/**
+ * Posts classés par ce qu'ils ont gagné sur la période (sauf tri « récents » : date de
+ * publication). Un post sans gain sur la période n'apparaît pas, sauf en tri « récents ».
+ */
+export async function getTopPosts(f: Filters, opts: { limit?: number; sort?: PostSort } = {}): Promise<PostRow[]> {
+  const { limit = 10, sort = "views" } = opts;
+  const now = new Date();
+  const start = new Date(now.getTime() - f.days * DAY);
+  const [loaded, posts] = await Promise.all([
+    loadSegments(f, new Date(start.getTime() - DAY), start),
+    prisma.post.findMany({
+      where: { account: accountWhere(f), ...(sort === "recent" ? {} : {}) },
+      include: { account: { select: { id: true, handle: true, platform: true, avatarUrl: true, ownership: true, creator: { select: { name: true } } } } },
+    }),
+  ]);
+  const gainedBy = sumBy(loaded.segments, "postId", start.getTime(), now.getTime());
+  const rows: PostRow[] = posts.map((p) => ({ ...p, gained: roundMetrics(gainedBy.get(p.id) ?? ZERO) }));
+  const er = (m: Metrics) => (m.views ? (m.likes + m.comments + m.shares + m.saves) / m.views : 0);
+  let sorted: PostRow[];
+  switch (sort) {
+    case "recent":
+      sorted = rows.sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime());
+      break;
+    case "likes":
+      sorted = rows.filter((r) => r.gained.likes > 0).sort((a, b) => b.gained.likes - a.gained.likes);
+      break;
+    case "engagement":
+      sorted = rows.filter((r) => r.gained.views >= 1000).sort((a, b) => er(b.gained) - er(a.gained));
+      break;
+    default:
+      sorted = rows.filter((r) => r.gained.views > 0).sort((a, b) => b.gained.views - a.gained.views);
   }
-  return posts;
+  return sorted.slice(0, limit);
 }
+
+// ---------------------------------------------------------------------------
+// Créateurs
+// ---------------------------------------------------------------------------
 
 export type CreatorRow = {
   id: string | null;
@@ -333,11 +362,15 @@ export async function getCreatorsLeaderboard(f: Filters, workspaceName: string):
   return [...groups.values()].sort((a, b) => b.viewsInPeriod - a.viewsInPeriod);
 }
 
+// ---------------------------------------------------------------------------
+// Divers
+// ---------------------------------------------------------------------------
+
 export async function getAccountDetail(workspaceId: string, accountId: string, days: Period) {
   const account = await prisma.account.findFirst({ where: { id: accountId, workspaceId }, include: { creator: true } });
   if (!account) return null;
   const f: Filters = { workspaceId, days, accountId };
-  const [overview, posts] = await Promise.all([getOverview(f), getTopPosts(f, { limit: 60, sort: "recent", allTime: true })]);
+  const [overview, posts] = await Promise.all([getOverview(f), getTopPosts(f, { limit: 60, sort: "recent" })]);
   return { account, overview, posts };
 }
 
@@ -354,7 +387,7 @@ export async function getLastSyncRun(workspaceId: string) {
   return prisma.syncRun.findFirst({ where: { workspaceId }, orderBy: { startedAt: "desc" } });
 }
 
-/** Dernier rafraîchissement effectif (ajout de compte compris) + comptes en erreur. */
+/** Dernier rafraîchissement effectif (ajout de compte compris) + comptes en erreur + crédits. */
 export async function getSyncStatus(workspaceId: string) {
   const [latest, running, failed, accounts, workspace] = await Promise.all([
     prisma.account.findFirst({ where: { workspaceId, lastSyncedAt: { not: null } }, orderBy: { lastSyncedAt: "desc" }, select: { lastSyncedAt: true } }),

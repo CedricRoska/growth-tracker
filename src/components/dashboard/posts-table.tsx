@@ -14,7 +14,11 @@ type Props = {
   emptyLabel?: string;
 };
 
-export function PostsTable({ posts, showAccount = true, compact = false, emptyLabel = "Aucun post sur cette période." }: Props) {
+/**
+ * Les colonnes de métriques affichent ce que le post a GAGNÉ sur la période ; le cumul
+ * depuis la publication est rappelé en petit sous les vues.
+ */
+export function PostsTable({ posts, showAccount = true, compact = false, emptyLabel = "Aucune vue gagnée sur cette période." }: Props) {
   if (posts.length === 0) {
     return <p className="px-4 py-8 text-center text-sm text-muted-foreground">{emptyLabel}</p>;
   }
@@ -26,7 +30,7 @@ export function PostsTable({ posts, showAccount = true, compact = false, emptyLa
           <TableHead>Post</TableHead>
           {showAccount && <TableHead className="hidden md:table-cell">Compte</TableHead>}
           <TableHead className="hidden sm:table-cell">Publié</TableHead>
-          <TableHead className="text-right">Vues</TableHead>
+          <TableHead className="text-right">Vues gagnées</TableHead>
           <TableHead className="hidden text-right sm:table-cell">Likes</TableHead>
           {!compact && <TableHead className="hidden text-right lg:table-cell">Comm.</TableHead>}
           {!compact && <TableHead className="hidden text-right lg:table-cell">Partages</TableHead>}
@@ -59,11 +63,20 @@ export function PostsTable({ posts, showAccount = true, compact = false, emptyLa
               </TableCell>
             )}
             <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">{formatDate(p.publishedAt)}</TableCell>
-            <TableCell className="text-right font-medium tabular-nums">{formatCompact(p.views)}</TableCell>
-            <TableCell className="hidden text-right tabular-nums sm:table-cell">{formatCompact(p.likes)}</TableCell>
-            {!compact && <TableCell className="hidden text-right tabular-nums lg:table-cell">{formatCompact(p.comments)}</TableCell>}
-            {!compact && <TableCell className="hidden text-right tabular-nums lg:table-cell">{formatCompact(p.shares)}</TableCell>}
-            {!compact && <TableCell className="hidden text-right tabular-nums text-muted-foreground md:table-cell">{formatPercent(engagementRate(p))}</TableCell>}
+            <TableCell className="text-right tabular-nums">
+              <span className="font-medium">{formatCompact(p.gained.views)}</span>
+              <span className="block text-xs text-muted-foreground" title="Cumul depuis la publication">
+                {formatCompact(p.views)} au total
+              </span>
+            </TableCell>
+            <TableCell className="hidden text-right tabular-nums sm:table-cell">{formatCompact(p.gained.likes)}</TableCell>
+            {!compact && <TableCell className="hidden text-right tabular-nums lg:table-cell">{formatCompact(p.gained.comments)}</TableCell>}
+            {!compact && <TableCell className="hidden text-right tabular-nums lg:table-cell">{formatCompact(p.gained.shares)}</TableCell>}
+            {!compact && (
+              <TableCell className="hidden text-right tabular-nums text-muted-foreground md:table-cell">
+                {p.gained.views ? formatPercent(engagementRate(p.gained)) : "–"}
+              </TableCell>
+            )}
           </TableRow>
         ))}
       </TableBody>

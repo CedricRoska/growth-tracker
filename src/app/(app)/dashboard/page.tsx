@@ -35,8 +35,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
       <div className="flex flex-col gap-4 p-4 md:p-6">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard title={`Vues · posts des ${overview.period} derniers jours`} value={overview.views} previous={overview.viewsPrev} hint="vs période précédente" />
-          <KpiCard title={`Likes · posts des ${overview.period} derniers jours`} value={overview.likes} previous={overview.likesPrev} hint="vs période précédente" />
+          <KpiCard title={`Vues gagnées sur ${overview.period} j`} value={overview.views} previous={overview.viewsPrev} hint={overview.syncsInPeriod < 2 ? "rafraîchis au moins 2 fois sur la période pour affiner" : "vs période précédente"} />
+          <KpiCard title={`Likes gagnés sur ${overview.period} j`} value={overview.likes} previous={overview.likesPrev} hint="vs période précédente" />
           <KpiCard
             title="Followers cumulés"
             value={overview.followers}
@@ -52,8 +52,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <Card>
           <Tabs defaultValue="views">
             <CardHeader>
-              <CardTitle>Par jour de publication</CardTitle>
-              <CardDescription>Vues et likes cumulés des posts publiés chaque jour, tous comptes filtrés confondus.</CardDescription>
+              <CardTitle>Vues gagnées par jour</CardTitle>
+              <CardDescription>Chaque vue est comptée le jour où elle arrive, quel que soit l’âge du post. Répartition estimée entre deux rafraîchissements.</CardDescription>
               <CardAction>
                 <TabsList>
                   <TabsTrigger value="views">Vues</TabsTrigger>
@@ -76,7 +76,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <Card className="xl:col-span-3">
             <CardHeader>
               <CardTitle>Top posts</CardTitle>
-              <CardDescription>Publiés sur la période, classés par vues.</CardDescription>
+              <CardDescription>Classés par vues gagnées sur la période.</CardDescription>
               <CardAction>
                 <Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/posts" />}>
                   Tout voir <ArrowRight className="size-3.5" />
@@ -91,7 +91,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           <Card className="xl:col-span-2">
             <CardHeader>
               <CardTitle>Top comptes</CardTitle>
-              <CardDescription>Par vues des posts publiés sur la période.</CardDescription>
+              <CardDescription>Par vues gagnées sur la période.</CardDescription>
               <CardAction>
                 <Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/accounts" />}>
                   Tout voir <ArrowRight className="size-3.5" />

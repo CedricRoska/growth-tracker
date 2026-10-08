@@ -32,7 +32,7 @@ export default async function CreatorsPage({ searchParams }: { searchParams: Pro
         <Card className="xl:col-span-2">
           <CardHeader>
             <CardTitle>Classement</CardTitle>
-            <CardDescription>Vues des posts publiés sur {filters.days} jours, tous comptes confondus. Les comptes internes sont regroupés sous « {workspace.name} ».</CardDescription>
+            <CardDescription>Vues gagnées sur {filters.days} jours, tous comptes confondus. Les comptes internes sont regroupés sous « {workspace.name} ».</CardDescription>
           </CardHeader>
           <CardContent className="px-0">
             {leaderboard.length === 0 ? (
@@ -44,7 +44,7 @@ export default async function CreatorsPage({ searchParams }: { searchParams: Pro
                     <TableHead className="w-10">#</TableHead>
                     <TableHead>Créateur</TableHead>
                     <TableHead className="hidden sm:table-cell">Plateformes</TableHead>
-                    <TableHead className="text-right">Vues période</TableHead>
+                    <TableHead className="text-right">Vues gagnées</TableHead>
                     <TableHead className="hidden text-right sm:table-cell">Posts</TableHead>
                     <TableHead className="hidden text-right md:table-cell">Followers</TableHead>
                     <TableHead className="hidden text-right md:table-cell">Vues / post</TableHead>

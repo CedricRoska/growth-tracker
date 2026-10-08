@@ -68,8 +68,8 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
         </Card>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard title={`Vues · posts des ${days} derniers jours`} value={overview.views} previous={overview.viewsPrev} hint="vs période précédente" />
-          <KpiCard title={`Likes · posts des ${days} derniers jours`} value={overview.likes} previous={overview.likesPrev} hint="vs période précédente" />
+          <KpiCard title={`Vues gagnées sur ${days} j`} value={overview.views} previous={overview.viewsPrev} hint={overview.syncsInPeriod < 2 ? "rafraîchis au moins 2 fois sur la période pour affiner" : "vs période précédente"} />
+          <KpiCard title={`Likes gagnés sur ${days} j`} value={overview.likes} previous={overview.likesPrev} hint="vs période précédente" />
           <KpiCard
             title="Followers"
             value={overview.followers}
@@ -84,8 +84,8 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
 
         <Card>
           <CardHeader>
-            <CardTitle>Vues par jour de publication</CardTitle>
-            <CardDescription>Vues cumulées des posts publiés chaque jour par ce compte.</CardDescription>
+            <CardTitle>Vues gagnées par jour</CardTitle>
+            <CardDescription>Vues reçues chaque jour par l’ensemble des posts du compte.</CardDescription>
           </CardHeader>
           <CardContent>
             <ViewsChart data={overview.series} />
