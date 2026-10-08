@@ -5,6 +5,9 @@ import { DbError } from "@/components/layout/db-error";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { getWorkspace } from "@/lib/queries";
 
+// Les server actions de rafraîchissement (10 comptes ≈ 1 à 2 min) héritent de cette durée max sur Vercel.
+export const maxDuration = 300;
+
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
   const workspaceId = session?.user?.workspaceId;

@@ -14,7 +14,8 @@
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
     "typecheck": "tsc --noEmit",
-    "provider:check": "tsx scripts/check-provider.ts"
+    "provider:check": "tsx scripts/check-provider.ts",
+    "vercel-build": "prisma migrate deploy && next build"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

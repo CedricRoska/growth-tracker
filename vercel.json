@@ -1,0 +1,6 @@
+{
+  "crons": [
+    { "path": "/api/cron/sync?mode=quick", "schedule": "0 5 * * *" },
+    { "path": "/api/cron/sync?mode=deep", "schedule": "30 4 * * 1" }
+  ]
+}

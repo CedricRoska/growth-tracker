@@ -10,7 +10,7 @@ Inspiré de viral.app. Premier usage : Loucio.
 - **Comptes** : leaderboard des comptes par vues gagnées, ajout d’un compte en un clic (le profil et ses posts sont récupérés immédiatement).
 - **Posts** : tous les posts de la période, triés par vues, likes, engagement ou date.
 - **Créateurs** : classement par créateur (les comptes internes sont regroupés), annuaire avec notes.
-- **Rafraîchissement à la demande** (comme PostHog), à deux niveaux : « Rafraîchir » récupère les posts des 7 derniers jours (1 à 2 crédits API par compte), « Rafraîchir complet » remet à jour 30 jours d’historique (3 à 4 crédits par compte). Pas de synchro automatique, donc pas de coût quand personne ne regarde. Les crédits restants sont affichés dans l’en-tête. Chaque rafraîchissement photographie les compteurs de chaque post : les vues sont comptées **le jour où elles arrivent**, comme chez viral.app, quel que soit l’âge du post. Entre deux rafraîchissements, le gain est réparti uniformément ; plus on rafraîchit, plus la courbe est précise.
+- **Rafraîchissement automatique et manuel** : chaque matin l’app relit les posts des 7 derniers jours (1 à 2 crédits API par compte), chaque lundi elle remet à jour 30 jours d’historique (3 à 4 crédits par compte). Le bouton « Rafraîchir » reste disponible à tout moment pour vérifier un post ou un compte. Les crédits restants sont affichés dans l’en-tête.
 - Filtres partout : période, plateforme, type de compte (interne / créateur), créateur.
 
 ## Stack
@@ -54,8 +54,8 @@ Ajouter une autre source = implémenter l’interface `SocialProvider` dans `src
 
 1. Pousser le repo sur GitHub, l’importer dans Vercel.
 2. Variables d’environnement : `DATABASE_URL`, `AUTH_SECRET`, `CRON_SECRET`, `SOCIAL_PROVIDER`, `SCRAPECREATORS_API_KEY` (si utilisé). Pas besoin d’`AUTH_URL` sur Vercel.
-3. Build command : `npx prisma generate && npx prisma migrate deploy && next build` (ou garder `next build` et lancer `prisma migrate deploy` à la main).
-4. Optionnel : si un jour vous voulez une synchro automatique, l’endpoint `/api/cron/sync` existe toujours (protégé par `CRON_SECRET`). Il suffit de l’appeler depuis un planificateur (Vercel Cron, GitHub Actions, cron-job.org).
+3. Build : Vercel utilise automatiquement le script `vercel-build` (`prisma migrate deploy && next build`), les migrations sont appliquées à chaque déploiement.
+4. Les deux rafraîchissements automatiques sont déclarés dans `vercel.json` (quotidien 5h UTC rapide, lundi 4h30 UTC complet). Vercel envoie automatiquement `Authorization: Bearer $CRON_SECRET`.
 5. Créer le premier utilisateur : `npx prisma db seed` avec `DATABASE_URL` de prod (ou adapter le seed pour ne créer que le workspace et l’admin).
 
 ## Structure
