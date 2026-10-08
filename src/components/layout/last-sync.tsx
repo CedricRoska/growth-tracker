@@ -13,9 +13,9 @@ export async function LastSync({ workspaceId }: { workspaceId: string }) {
   const { at, running, failed, credits, accounts } = await getSyncStatus(workspaceId);
   const quickDays = syncSettings("quick").lookbackDays;
   const deepDays = syncSettings("deep").lookbackDays;
-  // Estimations : rapide ≈ 1-2 pages / compte ; complet ≈ 3-4 pages / compte (2 posts par jour).
-  const quickCost = `${accounts}–${accounts * 2}`;
-  const deepCost = `${accounts * 3}–${accounts * 4}`;
+  // Estimations constatées en prod : rapide ≈ 2-3 crédits / compte (pages + profil Instagram) ; complet ≈ 4-5.
+  const quickCost = `${accounts * 2}–${accounts * 3}`;
+  const deepCost = `${accounts * 4}–${accounts * 5}`;
   const low = credits != null && credits < accounts * 2;
 
   return (
