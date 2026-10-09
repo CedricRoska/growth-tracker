@@ -54,7 +54,7 @@ export function Filters({ creators = [], showOwnership = true, showPlatform = tr
     startTransition(() => router.replace(`${pathname}?${next.toString()}`, { scroll: false }));
   };
 
-  const days = sp.get("days") ?? "30";
+  const days = sp.get("days") ?? "7";
   const creatorItems: Item[] = [{ value: "all", label: "Tous les créateurs" }, ...creators.map((c) => ({ value: c.id, label: c.name }))];
 
   return (

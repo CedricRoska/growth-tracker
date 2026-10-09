@@ -21,7 +21,7 @@ export type SearchParams = Record<string, string | string[] | undefined>;
 export function parseFilters(workspaceId: string, sp: SearchParams): Filters {
   const one = (k: string) => (Array.isArray(sp[k]) ? sp[k]?.[0] : sp[k]) as string | undefined;
   const daysRaw = Number(one("days"));
-  const days = (PERIODS.includes(daysRaw as Period) ? daysRaw : 30) as Period;
+  const days = (PERIODS.includes(daysRaw as Period) ? daysRaw : 7) as Period;
   const platform = one("platform");
   const ownership = one("ownership");
   return {
