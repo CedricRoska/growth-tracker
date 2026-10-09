@@ -6,7 +6,7 @@ Premier client : Loucio (le fondateur et son associé). Langue de l'UI : frança
 
 ## Stack
 - Next.js 16 (App Router, `src/`), React 19, TypeScript, Tailwind v4, shadcn/ui (style base-nova, Base UI).
-- Prisma 7 + Postgres via `@prisma/adapter-pg`. Client généré dans `src/generated/prisma` (ignoré par git) → `npx prisma generate` après clone.
+- Prisma 7 + Postgres via `@prisma/adapter-pg`. Client généré dans `src/generated/prisma` (ignoré par git) → `npx prisma generate` après clone. Pool pg volontairement petit (`DATABASE_POOL_MAX`, 3) : sur Vercel, `DATABASE_URL` = pooler Supabase en mode transaction (6543) et `DIRECT_URL` = mode session (5432) pour les migrations, car le mode session plafonne à 15 clients. **Tout script local qui touche la base doit importer `dotenv/config` en premier**, sinon `SOCIAL_PROVIDER` est vide et le provider mock écrit de fausses données en prod.
 - Auth.js v5 (credentials email + mot de passe, JWT). `src/proxy.ts` protège toutes les routes sauf `/login`, `/api/auth`, `/api/cron`.
 - Déploiement Vercel. Rafraîchissement automatique via Vercel Cron (`vercel.json`) : chaque matin en mode `quick` (7 j), le lundi en mode `deep` (30 j), endpoint `/api/cron/sync?mode=` protégé par `CRON_SECRET`. Le bouton « Rafraîchir » / menu « Rafraîchir complet » (`SyncButton` / `LastSync` sur chaque page) reste disponible à tout moment. `vercel-build` = `prisma migrate deploy && next build`.
 

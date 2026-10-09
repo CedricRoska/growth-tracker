@@ -53,7 +53,7 @@ Ajouter une autre source = implémenter l’interface `SocialProvider` dans `src
 ## Déployer sur Vercel
 
 1. Pousser le repo sur GitHub, l’importer dans Vercel.
-2. Variables d’environnement : `DATABASE_URL`, `AUTH_SECRET`, `CRON_SECRET`, `SOCIAL_PROVIDER`, `SCRAPECREATORS_API_KEY` (si utilisé). Pas besoin d’`AUTH_URL` sur Vercel.
+2. Variables d’environnement : `DATABASE_URL` (pooler Supabase en mode **Transaction**, port 6543), `DIRECT_URL` (pooler en mode **Session**, port 5432, pour les migrations), `AUTH_SECRET`, `CRON_SECRET`, `SOCIAL_PROVIDER`, `SCRAPECREATORS_API_KEY`. Pas besoin d’`AUTH_URL` sur Vercel. La connexion directe `db.xxx.supabase.co` est IPv6 et ne fonctionne pas depuis Vercel.
 3. Build : Vercel utilise automatiquement le script `vercel-build` (`prisma migrate deploy && next build`), les migrations sont appliquées à chaque déploiement.
 4. Les deux rafraîchissements automatiques sont déclarés dans `vercel.json` (quotidien 5h UTC rapide, lundi 4h30 UTC complet). Vercel envoie automatiquement `Authorization: Bearer $CRON_SECRET`.
 5. Créer le premier utilisateur : `npx prisma db seed` avec `DATABASE_URL` de prod (ou adapter le seed pour ne créer que le workspace et l’admin).

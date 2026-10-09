@@ -8,7 +8,8 @@ export default defineConfig({
     seed: "tsx prisma/seed.ts",
   },
   datasource: {
+    // Migrations : connexion directe ou pooler en mode session (DIRECT_URL), jamais le mode transaction.
     // `prisma generate` (postinstall) ne se connecte pas : un placeholder suffit si la variable manque.
-    url: process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/placeholder",
+    url: process.env.DIRECT_URL ?? process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/placeholder",
   },
 });
