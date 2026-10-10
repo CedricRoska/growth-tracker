@@ -24,7 +24,7 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
       <div className="p-4 md:p-6">
         <Card>
           <CardContent className="px-0">
-            <AccountsTable accounts={accounts} />
+            <AccountsTable accounts={accounts} periodLabel={`Gagné sur ${filters.days} j`} />
           </CardContent>
         </Card>
       </div>

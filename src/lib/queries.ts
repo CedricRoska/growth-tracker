@@ -97,6 +97,11 @@ async function loadSegments(f: Filters, since: Date, start: Date): Promise<Loade
 
 type FollowerSnap = { accountId: string; capturedAt: Date; followers: number };
 
+/**
+ * Followers de chaque compte à l'instant `at`, interpolés entre deux photos. Si le compte
+ * n'était pas encore suivi à cette date, on prend sa première photo : la croissance est
+ * alors « depuis le début du suivi », cohérent avec le calcul des vues gagnées.
+ */
 function followersAt(snaps: FollowerSnap[], at: Date) {
   const t = at.getTime();
   const before = new Map<string, FollowerSnap>();
@@ -116,7 +121,14 @@ function followersAt(snaps: FollowerSnap[], at: Date) {
     }
     byAccount.set(accountId, value);
   }
+  for (const [accountId, a] of after) if (!byAccount.has(accountId)) byAccount.set(accountId, a.followers);
   return byAccount;
+}
+
+function sumMap(m: Map<string, number>) {
+  let s = 0;
+  for (const v of m.values()) s += v;
+  return s;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,11 +147,14 @@ export type Overview = {
   likes: number;
   likesPrev: number;
   followers: number;
-  /** null si aucun snapshot antérieur au début de la période. */
+  /** Followers gagnés sur la période (depuis le début du suivi si plus récent). null sans aucune photo. */
   followersGained: number | null;
+  followersGainedPrev: number | null;
   postsPublished: number;
   postsPublishedPrev: number;
   totalViews: number;
+  totalLikes: number;
+  totalPosts: number;
   accounts: number;
   syncsInPeriod: number;
   /** Vues / likes gagnés chaque jour. */
@@ -158,15 +173,19 @@ export async function getOverview(f: Filters): Promise<Overview> {
     prisma.post.count({ where: { account: where, publishedAt: { gte: prevStart, lt: start } } }),
     prisma.accountSnapshot.findMany({ where: { account: where }, orderBy: { capturedAt: "asc" }, select: { accountId: true, capturedAt: true, followers: true } }),
     prisma.account.findMany({ where, select: { id: true, followers: true } }),
-    prisma.post.aggregate({ where: { account: where }, _sum: { views: true } }),
+    prisma.post.aggregate({ where: { account: where }, _sum: { views: true, likes: true }, _count: { _all: true } }),
   ]);
 
   const cur = roundMetrics(sumSegments(loaded.segments, start.getTime(), now.getTime()));
   const prev = roundMetrics(sumSegments(loaded.segments, prevStart.getTime(), start.getTime()));
   const followers = accountsList.reduce((s, a) => s + a.followers, 0);
-  const base = followersAt(followerSnaps, start);
-  const hasHistory = base.size > 0;
-  const followersBase = [...base.values()].reduce((s, v) => s + v, 0);
+  const atStart = followersAt(followerSnaps, start);
+  const atPrevStart = followersAt(followerSnaps, prevStart);
+  const hasHistory = followerSnaps.length > 0;
+  const followersGained = hasHistory ? followers - sumMap(atStart) : null;
+  // Période précédente : comptes déjà suivis avant son début uniquement, sinon la comparaison n'a pas de sens.
+  const trackedBefore = followerSnaps.filter((s) => s.capturedAt.getTime() <= prevStart.getTime()).length > 0;
+  const followersGainedPrev = trackedBefore ? sumMap(atStart) - sumMap(atPrevStart) : null;
   const series = dailySeries(loaded.segments, start.getTime(), f.days).map((p) => ({ ...p, followers }));
 
   return {
@@ -176,10 +195,13 @@ export async function getOverview(f: Filters): Promise<Overview> {
     likes: cur.likes,
     likesPrev: prev.likes,
     followers,
-    followersGained: hasHistory ? followers - followersBase : null,
+    followersGained,
+    followersGainedPrev,
     postsPublished,
     postsPublishedPrev,
     totalViews: totals._sum.views ?? 0,
+    totalLikes: totals._sum.likes ?? 0,
+    totalPosts: totals._count._all,
     accounts: accountsList.length,
     syncsInPeriod: loaded.syncsInPeriod,
     series,
@@ -200,13 +222,16 @@ export type AccountRow = {
   ownership: Ownership;
   creator: { id: string; name: string } | null;
   followers: number;
-  /** null sans historique de snapshots. */
+  /** Followers gagnés sur la période (depuis le début du suivi si plus récent). null sans aucune photo. */
   followersGained: number | null;
-  /** Vues gagnées sur la période. */
+  /** Gagné sur la période. */
   viewsInPeriod: number;
   likesInPeriod: number;
-  totalViews: number;
   postsInPeriod: number;
+  /** Cumuls. */
+  totalViews: number;
+  totalLikes: number;
+  totalPosts: number;
   syncStatus: string;
   syncError: string | null;
   lastSyncedAt: Date | null;
@@ -222,16 +247,17 @@ export async function getAccountsLeaderboard(f: Filters): Promise<AccountRow[]> 
     loadSegments(f, new Date(start.getTime() - DAY), start),
     prisma.accountSnapshot.findMany({ where: { account: where }, orderBy: { capturedAt: "asc" }, select: { accountId: true, capturedAt: true, followers: true } }),
     prisma.post.groupBy({ by: ["accountId"], where: { account: where, publishedAt: { gte: start } }, _count: { _all: true } }),
-    prisma.post.groupBy({ by: ["accountId"], where: { account: where }, _sum: { views: true } }),
+    prisma.post.groupBy({ by: ["accountId"], where: { account: where }, _sum: { views: true, likes: true }, _count: { _all: true } }),
   ]);
   const gained = sumBy(loaded.segments, "accountId", start.getTime(), now.getTime());
   const base = followersAt(followerSnaps, start);
   const counts = new Map(postCounts.map((c) => [c.accountId, c._count._all]));
-  const totalViews = new Map(totals.map((c) => [c.accountId, c._sum.views ?? 0]));
+  const totalsBy = new Map(totals.map((c) => [c.accountId, c]));
   return accounts
     .map((a) => {
       const g = gained.get(a.id) ?? ZERO;
       const b = base.get(a.id);
+      const t = totalsBy.get(a.id);
       return {
         id: a.id,
         platform: a.platform,
@@ -245,8 +271,10 @@ export async function getAccountsLeaderboard(f: Filters): Promise<AccountRow[]> 
         followersGained: b != null ? a.followers - b : null,
         viewsInPeriod: Math.round(g.views),
         likesInPeriod: Math.round(g.likes),
-        totalViews: totalViews.get(a.id) ?? 0,
         postsInPeriod: counts.get(a.id) ?? 0,
+        totalViews: t?._sum.views ?? 0,
+        totalLikes: t?._sum.likes ?? 0,
+        totalPosts: t?._count._all ?? 0,
         syncStatus: a.syncStatus,
         syncError: a.syncError,
         lastSyncedAt: a.lastSyncedAt,
@@ -331,8 +359,11 @@ export type CreatorRow = {
   ownership: Ownership;
   accounts: number;
   followers: number;
+  followersGained: number;
   viewsInPeriod: number;
+  likesInPeriod: number;
   postsInPeriod: number;
+  totalViews: number;
   platforms: Platform[];
 };
 
@@ -348,14 +379,20 @@ export async function getCreatorsLeaderboard(f: Filters, workspaceName: string):
       ownership: r.ownership,
       accounts: 0,
       followers: 0,
+      followersGained: 0,
       viewsInPeriod: 0,
+      likesInPeriod: 0,
       postsInPeriod: 0,
+      totalViews: 0,
       platforms: [],
     };
     g.accounts += 1;
     g.followers += r.followers;
+    g.followersGained += r.followersGained ?? 0;
     g.viewsInPeriod += r.viewsInPeriod;
+    g.likesInPeriod += r.likesInPeriod;
     g.postsInPeriod += r.postsInPeriod;
+    g.totalViews += r.totalViews;
     if (!g.platforms.includes(r.platform)) g.platforms.push(r.platform);
     groups.set(key, g);
   }

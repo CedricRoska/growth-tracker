@@ -45,9 +45,11 @@ export default async function CreatorsPage({ searchParams }: { searchParams: Pro
                     <TableHead>Créateur</TableHead>
                     <TableHead className="hidden sm:table-cell">Plateformes</TableHead>
                     <TableHead className="text-right">Vues gagnées</TableHead>
+                    <TableHead className="hidden text-right sm:table-cell">Likes gagnés</TableHead>
+                    <TableHead className="hidden text-right md:table-cell">Followers gagnés</TableHead>
                     <TableHead className="hidden text-right sm:table-cell">Posts</TableHead>
                     <TableHead className="hidden text-right md:table-cell">Followers</TableHead>
-                    <TableHead className="hidden text-right md:table-cell">Vues / post</TableHead>
+                    <TableHead className="hidden text-right lg:table-cell">Vues / post</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -68,9 +70,14 @@ export default async function CreatorsPage({ searchParams }: { searchParams: Pro
                         </div>
                       </TableCell>
                       <TableCell className="text-right font-medium tabular-nums">{formatCompact(c.viewsInPeriod)}</TableCell>
+                      <TableCell className="hidden text-right tabular-nums sm:table-cell">{formatCompact(c.likesInPeriod)}</TableCell>
+                      <TableCell className={`hidden text-right tabular-nums md:table-cell ${c.followersGained > 0 ? "text-emerald-600 dark:text-emerald-400" : c.followersGained < 0 ? "text-red-600" : "text-muted-foreground"}`}>
+                        {c.followersGained > 0 ? "+" : ""}
+                        {formatCompact(c.followersGained)}
+                      </TableCell>
                       <TableCell className="hidden text-right tabular-nums sm:table-cell">{c.postsInPeriod}</TableCell>
-                      <TableCell className="hidden text-right tabular-nums md:table-cell">{formatCompact(c.followers)}</TableCell>
-                      <TableCell className="hidden text-right tabular-nums text-muted-foreground md:table-cell">
+                      <TableCell className="hidden text-right tabular-nums text-muted-foreground md:table-cell">{formatCompact(c.followers)}</TableCell>
+                      <TableCell className="hidden text-right tabular-nums text-muted-foreground lg:table-cell">
                         {c.postsInPeriod ? formatCompact(Math.round(c.viewsInPeriod / c.postsInPeriod)) : "–"}
                       </TableCell>
                     </TableRow>
