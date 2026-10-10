@@ -68,8 +68,8 @@ export default async function AccountPage({ params, searchParams }: { params: Pr
         </Card>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard title={`Vues gagnées sur ${days} j`} value={overview.views} previous={overview.viewsPrev} hint={overview.syncsInPeriod < 2 ? "rafraîchis au moins 2 fois sur la période pour affiner" : `vs période précédente · ${formatCompact(overview.totalViews)} au total`} />
-          <KpiCard title={`Likes gagnés sur ${days} j`} value={overview.likes} previous={overview.likesPrev} hint={`vs période précédente · ${formatCompact(overview.totalLikes)} au total`} />
+          <KpiCard title={`Vues gagnées sur ${days} j`} value={overview.views} previous={overview.viewsPrev} hint={overview.syncsInPeriod < 2 ? "rafraîchis au moins 2 fois sur la période pour affiner" : `${overview.viewsPrev ? "vs période précédente" : "pas encore de période précédente"} · ${formatCompact(overview.totalViews)} au total`} />
+          <KpiCard title={`Likes gagnés sur ${days} j`} value={overview.likes} previous={overview.likesPrev} hint={`${overview.likesPrev ? "vs période précédente" : "pas encore de période précédente"} · ${formatCompact(overview.totalLikes)} au total`} />
           <KpiCard
             title={`Followers gagnés sur ${days} j`}
             value={overview.followersGained ?? 0}

@@ -35,8 +35,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
       <div className="flex flex-col gap-4 p-4 md:p-6">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard title={`Vues gagnées sur ${overview.period} j`} value={overview.views} previous={overview.viewsPrev} hint={overview.syncsInPeriod < 2 ? "rafraîchis au moins 2 fois sur la période pour affiner" : `vs période précédente · ${formatCompact(overview.totalViews)} au total`} />
-          <KpiCard title={`Likes gagnés sur ${overview.period} j`} value={overview.likes} previous={overview.likesPrev} hint={`vs période précédente · ${formatCompact(overview.totalLikes)} au total`} />
+          <KpiCard title={`Vues gagnées sur ${overview.period} j`} value={overview.views} previous={overview.viewsPrev} hint={overview.syncsInPeriod < 2 ? "rafraîchis au moins 2 fois sur la période pour affiner" : `${overview.viewsPrev ? "vs période précédente" : "pas encore de période précédente"} · ${formatCompact(overview.totalViews)} au total`} />
+          <KpiCard title={`Likes gagnés sur ${overview.period} j`} value={overview.likes} previous={overview.likesPrev} hint={`${overview.likesPrev ? "vs période précédente" : "pas encore de période précédente"} · ${formatCompact(overview.totalLikes)} au total`} />
           <KpiCard
             title={`Followers gagnés sur ${overview.period} j`}
             value={overview.followersGained ?? 0}
